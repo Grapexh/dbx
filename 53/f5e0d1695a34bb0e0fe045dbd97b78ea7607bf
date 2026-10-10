@@ -1,0 +1,40 @@
+apps/desktop/src/composables/__tests__/useSqlExecution.spec.ts
+  s_ee9a344486bcf4::t_665ab69088158d 13,909-941
+  s_ee9a344486bcf4::t_3c7fdf432782c2 942
+apps/desktop/src/lib/sql/sqlParameters.ts
+  s_ee9a344486bcf4::t_c73d0a8ffa2c47 2,385
+  s_ee9a344486bcf4::t_d64a081e2aa030 546
+apps/desktop/src/lib/sql/sqlVariables.ts
+  s_ee9a344486bcf4::t_c73d0a8ffa2c47 15,246-247,310
+apps/desktop/src/lib/sql/sqlDatabaseLinks.ts
+  s_ee9a344486bcf4::t_c73d0a8ffa2c47 1-10,12-39,42-51,53-100
+  s_ee9a344486bcf4::t_431ab173493c83 40,52
+  s_ee9a344486bcf4::t_1b03d232602b2f 11
+  s_ee9a344486bcf4::t_4cd3aa26c352d6 41
+apps/desktop/src/lib/sql/sqlIdentifier.ts
+  s_ee9a344486bcf4::t_c73d0a8ffa2c47 560-563
+apps/desktop/src/lib/__tests__/sql/sqlParameters.spec.ts
+  s_ee9a344486bcf4::t_665ab69088158d 346,450-454,456-458,469-470,476-477,479-487,496-498
+  s_ee9a344486bcf4::t_d64a081e2aa030 455
+  s_ee9a344486bcf4::t_431ab173493c83 459-468,471-475,478
+  s_ee9a344486bcf4::t_1b03d232602b2f 488-495
+apps/desktop/src/lib/__tests__/sql/sqlVariables.spec.ts
+  s_ee9a344486bcf4::t_665ab69088158d 78-101,109-113
+  s_ee9a344486bcf4::t_1b03d232602b2f 102-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "53f5e0d1695a34bb0e0fe045dbd97b78ea7607bf",
+  "prompts": {},
+  "sessions": {
+    "s_ee9a344486bcf4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12493-a93c-7572-a01b-e8b684de2fdb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Grapexh <grapex@foxmail.com>"
+    }
+  }
+}
