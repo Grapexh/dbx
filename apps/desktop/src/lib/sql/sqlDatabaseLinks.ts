@@ -40,7 +40,27 @@ export function collectSqlDatabaseLinkStarts(sql: string, databaseType?: Databas
     // DM8 的保留字表未列 THEN，但 THEN @fn(...) 是模板表达式；只排除
     // 未限定的裸关键字，仍允许 "THEN" 对象及 HR.then@link(...) 远程调用。
     const damengThenExpression = databaseType === "dameng" && objectStart === i - 1 && object.kind === "word" && object.normalized === "then";
-    const routineCall = !damengThenExpression && tokens[i + 1]?.text === "(" && (object.kind === "quoted_identifier" || !isReservedKeyword(object.text));
+    let sqlXmlExpression = false;
+    if (objectStart === i - 1 && object.kind === "word" && ["content", "document", "passing"].includes(object.normalized)) {
+      // 只检查最近一层 SQL/XML 函数中的语法位置，不能把同名真实远程函数
+      // 当关键字；例如 CONTENT content@link(...) 中第二个 content 是对象。
+      for (let j = objectStart - 1; j >= 0; j -= 1) {
+        const before = tokens[j];
+        if (before.text === ";" || before.depth < object.depth - 1) break;
+        if (before.text !== "(" || before.depth !== object.depth - 1) continue;
+        const enclosingFunction = tokens[j - 1];
+        if (enclosingFunction?.kind === "word" && tokens[j - 2]?.text !== ".") {
+          if (enclosingFunction.normalized === "xmlserialize") {
+            sqlXmlExpression = objectStart === j + 1 && (object.normalized === "content" || object.normalized === "document");
+          } else if (enclosingFunction.normalized === "xmlquery" && object.normalized === "passing" && objectStart > j + 1) {
+            // PASSING 前必须有 XQuery 表达式，且同层只能把首个 PASSING 当子句。
+            sqlXmlExpression = !tokens.slice(j + 1, objectStart).some((item) => item.depth === object.depth && item.kind === "word" && item.normalized === "passing");
+          }
+        }
+        break;
+      }
+    }
+    const routineCall = !damengThenExpression && !sqlXmlExpression && tokens[i + 1]?.text === "(" && (object.kind === "quoted_identifier" || !isReservedKeyword(object.text));
     let objectContext = (ORACLE_OBJECT_PREFIX_KEYWORDS.has(prefix) && !(prefix === "update" && tokens[objectStart - 2]?.normalized === "for")) || routineCall;
     // A comma can separate tables or expressions. Only a FROM list makes the
     // following non-reserved keyword an object name, including after subqueries.

@@ -976,6 +976,27 @@ SELECT @value AS Message;`;
     expect(executeCurrentSql).toHaveBeenCalledWith("SELECT XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB) FROM DUAL", { tabId: "tab-1" });
   });
 
+  it.each(["oracle", "oceanbase-oracle", "dameng"] as const)("expands %s SQL/XML function names before execution", async (databaseType) => {
+    const selectedSql = "SELECT XMLSERIALIZE(CONTENT @fn('<a/>') AS CLOB) FROM DUAL";
+    const sql = `@set fn = XMLTYPE;\n${selectedSql}`;
+    const selectionFrom = sql.indexOf("SELECT");
+    const activeTab = ref<QueryTab | undefined>({ ...queryTab("test"), sql });
+    const activeConnection = ref<ConnectionConfig | undefined>(connection(databaseType));
+    const activeOutputView = ref<"result" | "summary" | "explain" | "chart">("result");
+    const executeCurrentSql = vi.spyOn(useQueryStore(), "executeCurrentSql").mockResolvedValue(undefined);
+    vi.spyOn(useHistoryStore(), "add").mockResolvedValue(undefined);
+    const execution = useSqlExecution({ activeTab: computed(() => activeTab.value), activeConnection: computed(() => activeConnection.value), executableSql: computed(() => sql), activeOutputView });
+
+    await execution.tryExecute();
+    expect(execution.showSqlParameterDialog.value).toBe(false);
+    expect(executeCurrentSql).toHaveBeenLastCalledWith("SELECT XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB) FROM DUAL", { tabId: "tab-1" });
+
+    await execution.tryExecute({ fullSql: sql, selectedSql, cursorPos: selectionFrom, selectionFrom, selectionTo: sql.length });
+    expect(execution.showSqlParameterDialog.value).toBe(false);
+    expect(executeCurrentSql).toHaveBeenCalledTimes(2);
+    expect(executeCurrentSql).toHaveBeenLastCalledWith("SELECT XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB) FROM DUAL", { tabId: "tab-1" });
+  });
+
   it("sends native SET variables without client-side expansion", async () => {
     const activeTab = ref<QueryTab | undefined>(queryTab("app"));
     const activeConnection = ref<ConnectionConfig | undefined>(connection("mysql"));

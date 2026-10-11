@@ -366,6 +366,32 @@ describe("extractSqlParameters", () => {
       expect(substituteSqlParameters(sql, { value: { kind: "raw", value } }, { databaseType })).toBe(sql.replace("@value", value));
     });
 
+    it.each([
+      ["SELECT XMLSERIALIZE(CONTENT @fn('<a/>') AS CLOB) FROM DUAL", "SELECT XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB) FROM DUAL"],
+      ["SELECT XMLSERIALIZE(DOCUMENT @fn('<a/>') AS CLOB) FROM DUAL", "SELECT XMLSERIALIZE(DOCUMENT XMLTYPE('<a/>') AS CLOB) FROM DUAL"],
+      ["SELECT XMLQUERY('/a' PASSING @fn('<a/>') RETURNING CONTENT) FROM DUAL", "SELECT XMLQUERY('/a' PASSING XMLTYPE('<a/>') RETURNING CONTENT) FROM DUAL"],
+      ["SELECT XMLQUERY(fn_nested('/a') PASSING @fn('<a/>') RETURNING CONTENT) FROM DUAL", "SELECT XMLQUERY(fn_nested('/a') PASSING XMLTYPE('<a/>') RETURNING CONTENT) FROM DUAL"],
+      ["SELECT COALESCE(XMLSERIALIZE(CONTENT @fn('<a/>') AS CLOB), 'empty') FROM DUAL", "SELECT COALESCE(XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB), 'empty') FROM DUAL"],
+    ])("keeps function-name templates after SQL/XML keywords in %s", (sql, expected) => {
+      expect(extractSqlParameters(sql, { databaseType })).toEqual(["fn"]);
+      expect(substituteSqlParameters(sql, { fn: { kind: "raw", value: "XMLTYPE" } }, { databaseType })).toBe(expected);
+    });
+
+    it.each([
+      "SELECT content@LINK('<a/>'), document@LINK('<a/>'), passing@LINK('<a/>') FROM DUAL",
+      'SELECT HR.content@LINK(1), "CONTENT"@LINK(1) FROM DUAL',
+      'SELECT XMLSERIALIZE(CONTENT HR.content@LINK(1) AS CLOB), XMLSERIALIZE(DOCUMENT "DOCUMENT"@LINK(1) AS CLOB) FROM DUAL',
+      "SELECT XMLQUERY('/a' PASSING HR.passing@LINK(1) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLSERIALIZE(CONTENT (content@LINK(1)) AS CLOB) FROM DUAL",
+      "SELECT XMLSERIALIZE(CONTENT content@LINK(1) AS CLOB), XMLSERIALIZE(DOCUMENT document@LINK(1) AS CLOB) FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING passing@LINK(1) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLQUERY(passing@LINK(1)) FROM DUAL",
+      "SELECT XMLQUERY(fn_nested('/a') PASSING passing@LINK(1) RETURNING CONTENT) FROM DUAL",
+    ])("preserves real remote routines named after SQL/XML keywords in %s", (sql) => {
+      expect(extractSqlParameters(sql, { databaseType })).toEqual([]);
+      expect(substituteSqlParameters(sql, { LINK: { kind: "raw", value: "WRONG" } }, { databaseType })).toBe(sql);
+    });
+
     it("preserves remote routine links in expressions and PL/SQL calls", () => {
       const sql = "SELECT HR.get_value@LINK(:id) FROM DUAL; BEGIN HR.run_job /* link */ @LINK(:id); END;";
       expect(extractSqlParameters(sql, { databaseType })).toEqual(["id"]);

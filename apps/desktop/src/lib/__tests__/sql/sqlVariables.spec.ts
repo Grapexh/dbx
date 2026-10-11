@@ -101,6 +101,32 @@ describe("expandSqlVariables", () => {
       expect(expandSqlVariables(target, { databaseType, declarationSql: `@set value = ${value};` }).sql).toBe(expected);
     });
 
+    it.each([
+      ["SELECT XMLSERIALIZE(CONTENT @fn('<a/>') AS CLOB) FROM DUAL", "SELECT XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB) FROM DUAL"],
+      ["SELECT XMLSERIALIZE(DOCUMENT @fn('<a/>') AS CLOB) FROM DUAL", "SELECT XMLSERIALIZE(DOCUMENT XMLTYPE('<a/>') AS CLOB) FROM DUAL"],
+      ["SELECT XMLQUERY('/a' PASSING @fn('<a/>') RETURNING CONTENT) FROM DUAL", "SELECT XMLQUERY('/a' PASSING XMLTYPE('<a/>') RETURNING CONTENT) FROM DUAL"],
+      ["SELECT XMLQUERY(fn_nested('/a') PASSING @fn('<a/>') RETURNING CONTENT) FROM DUAL", "SELECT XMLQUERY(fn_nested('/a') PASSING XMLTYPE('<a/>') RETURNING CONTENT) FROM DUAL"],
+    ])("expands SQL/XML function-name templates in %s", (target, expected) => {
+      const declarationSql = `@set fn = XMLTYPE;\n${target}`;
+      expect(expandSqlVariables(declarationSql, { databaseType }).sql).toBe(expected);
+      expect(expandSqlVariables(target, { databaseType, declarationSql }).sql).toBe(expected);
+    });
+
+    it("preserves SQL/XML keyword-named remote routines with a same-name declaration", () => {
+      const target = 'SELECT content@LINK(1), document@LINK(1), passing@LINK(1), HR.content@LINK(1), "CONTENT"@LINK(1) FROM DUAL WHERE id = @LINK';
+      expect(expandSqlVariables(`@set LINK = 7;\n${target}`, { databaseType }).sql).toBe('SELECT content@LINK(1), document@LINK(1), passing@LINK(1), HR.content@LINK(1), "CONTENT"@LINK(1) FROM DUAL WHERE id = 7');
+    });
+
+    it.each([
+      "SELECT XMLSERIALIZE(CONTENT content@LINK(1) AS CLOB) FROM DUAL",
+      "SELECT XMLSERIALIZE(DOCUMENT document@LINK(1) AS CLOB) FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING passing@LINK(1) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLQUERY(passing@LINK(1)) FROM DUAL",
+      "SELECT XMLQUERY(fn_nested('/a') PASSING passing@LINK(1) RETURNING CONTENT) FROM DUAL",
+    ])("preserves real routines inside SQL/XML clauses in %s", (target) => {
+      expect(expandSqlVariables(`@set LINK = WRONG;\n${target}`, { databaseType }).sql).toBe(target);
+    });
+
     it("preserves remote routines alongside same-name variable references", () => {
       const target = 'SELECT HR.get_value@LINK(@LINK) FROM "Hr"."Employees" /* link */ @LINK WHERE id = @LINK; BEGIN HR.run_job@LINK(@LINK); END;';
       expect(expandSqlVariables(`@set LINK = 7;\n${target}`, { databaseType }).sql).toBe('SELECT HR.get_value@LINK(7) FROM "Hr"."Employees" /* link */ @LINK WHERE id = 7; BEGIN HR.run_job@LINK(7); END;');
