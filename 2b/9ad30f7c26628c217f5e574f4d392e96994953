@@ -1,0 +1,21 @@
+apps/desktop/src/lib/__tests__/sql/sqlParameters.spec.ts
+  s_22521a58d38fe2::t_14b06aeab68da6 313-319,327
+apps/desktop/src/composables/__tests__/useSqlExecution.spec.ts
+  s_22521a58d38fe2::t_ce85ae4c93daaf 901-906
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2b9ad30f7c26628c217f5e574f4d392e96994953",
+  "prompts": {},
+  "sessions": {
+    "s_22521a58d38fe2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123f0-7ad6-76a3-a631-f79973205777",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Grapexh <grapex@foxmail.com>"
+    }
+  }
+}
