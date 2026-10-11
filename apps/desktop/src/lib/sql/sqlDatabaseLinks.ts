@@ -1,9 +1,45 @@
 import type { DatabaseType } from "@/types/database";
 import { isDamengReservedKeyword, isOracleReservedKeyword } from "@/lib/sql/sqlIdentifier";
 import { tokenizeSqlSemantic } from "@/lib/sql/semantic/tokens";
+import type { SqlSemanticToken } from "@/lib/sql/semantic/types";
 
 const ORACLE_OBJECT_PREFIX_KEYWORDS = new Set(["from", "join", "update", "into", "table", "delete"]);
 const ORACLE_TABLE_LIST_BOUNDARIES = new Set(["select", "from", "where", "group", "having", "order", "connect", "start", "union", "intersect", "minus", "for", "returning", "set", "values"]);
+const PLSQL_TEMPLATE_PREFIX_KEYWORDS = new Set(["begin", "if", "elsif", "loop", "while", "return", "then", "else", "case", "when"]);
+
+function collectSqlXmlKeywordPositions(tokens: readonly SqlSemanticToken[]): Set<number> {
+  const keywords = new Set<number>();
+  const contexts: { openingIndex: number; functionName: string; passingIndex?: number }[] = [];
+  for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
+    const token = tokens[tokenIndex];
+    if (token.text === ";") {
+      contexts.length = 0;
+      continue;
+    }
+    if (token.text === "(" || token.text === "（") {
+      const enclosingFunction = tokens[tokenIndex - 1];
+      contexts.push({ openingIndex: tokenIndex, functionName: enclosingFunction?.kind === "word" && tokens[tokenIndex - 2]?.text !== "." ? enclosingFunction.normalized : "" });
+      continue;
+    }
+    if (token.text === ")" || token.text === "）") {
+      contexts.pop();
+      continue;
+    }
+    const context = contexts[contexts.length - 1];
+    if (!context || token.kind !== "word" || tokens[tokenIndex - 1]?.text === ".") continue;
+    if (context.functionName === "xmlserialize") {
+      if (tokenIndex === context.openingIndex + 1 && (token.normalized === "content" || token.normalized === "document")) keywords.add(tokenIndex);
+    } else if (context.functionName === "xmlquery" || context.functionName === "xmltable") {
+      if (token.normalized === "passing" && context.passingIndex === undefined && tokenIndex > context.openingIndex + 1) {
+        context.passingIndex = tokenIndex;
+        keywords.add(tokenIndex);
+      } else if (context.passingIndex !== undefined && tokenIndex === context.passingIndex + 2 && tokens[tokenIndex - 1]?.normalized === "by" && token.normalized === "value") {
+        keywords.add(tokenIndex);
+      }
+    }
+  }
+  return keywords;
+}
 
 // 仅服务 SQL 解析，不扩展 Oracle 元数据或 UI 能力。每批扫描一次并保留原始位置，
 // 参数替换和 @set 展开共同保护对象链接，避免宽松前缀判断吞掉表达式或 DDL 参数。
@@ -23,6 +59,7 @@ export function collectSqlDatabaseLinkStarts(sql: string, databaseType?: Databas
         { ...token, text: token.text.slice(marker), normalized: token.normalized.slice(marker), span: { ...token.span, start: token.span.start + marker } },
       ];
     });
+  const sqlXmlKeywords = collectSqlXmlKeywordPositions(tokens);
   for (let i = 1; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token.kind !== "word" || !token.text.startsWith("@")) continue;
@@ -37,30 +74,11 @@ export function collectSqlDatabaseLinkStarts(sql: string, databaseType?: Databas
     // 只识别表对象上下文或远程调用；CONTENT、BODY、LINK 等表达式/DDL
     // 关键字及带引号的普通表达式后仍允许使用真实模板参数。
     const object = tokens[i - 1];
-    // DM8 的保留字表未列 THEN，但 THEN @fn(...) 是模板表达式；只排除
-    // 未限定的裸关键字，仍允许 "THEN" 对象及 HR.then@link(...) 远程调用。
-    const damengThenExpression = databaseType === "dameng" && objectStart === i - 1 && object.kind === "word" && object.normalized === "then";
-    let sqlXmlExpression = false;
-    if (objectStart === i - 1 && object.kind === "word" && ["content", "document", "passing"].includes(object.normalized)) {
-      // 只检查最近一层 SQL/XML 函数中的语法位置，不能把同名真实远程函数
-      // 当关键字；例如 CONTENT content@link(...) 中第二个 content 是对象。
-      for (let j = objectStart - 1; j >= 0; j -= 1) {
-        const before = tokens[j];
-        if (before.text === ";" || before.depth < object.depth - 1) break;
-        if (before.text !== "(" || before.depth !== object.depth - 1) continue;
-        const enclosingFunction = tokens[j - 1];
-        if (enclosingFunction?.kind === "word" && tokens[j - 2]?.text !== ".") {
-          if (enclosingFunction.normalized === "xmlserialize") {
-            sqlXmlExpression = objectStart === j + 1 && (object.normalized === "content" || object.normalized === "document");
-          } else if (enclosingFunction.normalized === "xmlquery" && object.normalized === "passing" && objectStart > j + 1) {
-            // PASSING 前必须有 XQuery 表达式，且同层只能把首个 PASSING 当子句。
-            sqlXmlExpression = !tokens.slice(j + 1, objectStart).some((item) => item.depth === object.depth && item.kind === "word" && item.normalized === "passing");
-          }
-        }
-        break;
-      }
-    }
-    const routineCall = !damengThenExpression && !sqlXmlExpression && tokens[i + 1]?.text === "(" && (object.kind === "quoted_identifier" || !isReservedKeyword(object.text));
+    // SQL 保留字表未涵盖所有 PL/SQL 控制关键字；只排除未限定的裸关键字，
+    // 仍允许带引号对象及 HR.then@link(...) 等限定远程调用。
+    const proceduralExpression = objectStart === i - 1 && object.kind === "word" && PLSQL_TEMPLATE_PREFIX_KEYWORDS.has(object.normalized);
+    const sqlXmlExpression = objectStart === i - 1 && sqlXmlKeywords.has(objectStart);
+    const routineCall = !proceduralExpression && !sqlXmlExpression && tokens[i + 1]?.text === "(" && (object.kind === "quoted_identifier" || !isReservedKeyword(object.text));
     let objectContext = (ORACLE_OBJECT_PREFIX_KEYWORDS.has(prefix) && !(prefix === "update" && tokens[objectStart - 2]?.normalized === "for")) || routineCall;
     // A comma can separate tables or expressions. Only a FROM list makes the
     // following non-reserved keyword an object name, including after subqueries.

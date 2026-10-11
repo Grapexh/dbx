@@ -378,6 +378,29 @@ describe("extractSqlParameters", () => {
     });
 
     it.each([
+      "SELECT XMLQUERY('/a' PASSING BY VALUE @fn('<a/>') RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING @fn('<a/>') COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING BY /* separator */ VALUE @fn('<a/>') COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING BY VALUE @fn('<a/>'), @fn('<b/>') AS b RETURNING CONTENT) FROM DUAL",
+      "SELECT COALESCE(XMLQUERY(fn_nested('/a') PASSING BY VALUE @fn('<a/>') RETURNING CONTENT), NULL) FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING BY VALUE XMLQUERY('/b' PASSING BY VALUE @fn('<a/>') RETURNING CONTENT) RETURNING CONTENT) FROM DUAL",
+    ])("keeps complete SQL/XML PASSING function templates in %s", (sql) => {
+      expect(extractSqlParameters(sql, { databaseType })).toEqual(["fn"]);
+      expect(substituteSqlParameters(sql, { fn: { kind: "raw", value: "XMLTYPE" } }, { databaseType })).toBe(sql.replaceAll("@fn", "XMLTYPE"));
+    });
+
+    it.each([
+      "SELECT XMLQUERY('/a' PASSING BY VALUE value@LINK(1) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING passing@LINK(1) COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING BY VALUE HR.value@LINK(1), \"VALUE\"@LINK(1) AS b COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING BY VALUE (value@LINK(1)) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING COALESCE(passing@LINK(1), NULL) RETURNING CONTENT) FROM DUAL",
+    ])("preserves remote routines inside complete SQL/XML PASSING clauses in %s", (sql) => {
+      expect(extractSqlParameters(sql, { databaseType })).toEqual([]);
+      expect(substituteSqlParameters(sql, { LINK: { kind: "raw", value: "WRONG" } }, { databaseType })).toBe(sql);
+    });
+
+    it.each([
       "SELECT content@LINK('<a/>'), document@LINK('<a/>'), passing@LINK('<a/>') FROM DUAL",
       'SELECT HR.content@LINK(1), "CONTENT"@LINK(1) FROM DUAL',
       'SELECT XMLSERIALIZE(CONTENT HR.content@LINK(1) AS CLOB), XMLSERIALIZE(DOCUMENT "DOCUMENT"@LINK(1) AS CLOB) FROM DUAL',
@@ -517,6 +540,29 @@ describe("extractSqlParameters", () => {
     const sql = `SELECT CASE WHEN 1=1 THEN${separator}@value(1) ELSE 0 END FROM DUAL`;
     expect(extractSqlParameters(sql, { databaseType: "dameng" })).toEqual(["value"]);
     expect(substituteSqlParameters(sql, { value: { kind: "raw", value: "ABS" } }, { databaseType: "dameng" })).toBe(`SELECT CASE WHEN 1=1 THEN${separator}ABS(1) ELSE 0 END FROM DUAL`);
+  });
+
+  it("preserves a large expression of SQL/XML-keyword-named remote calls", () => {
+    const expression = Array.from({ length: 8000 }, (_, tokenIndex) => `${["content", "document", "passing"][tokenIndex % 3]}@LINK(1)`).join(" + ");
+    const sql = `SELECT ${expression} FROM DUAL WHERE id = :id`;
+    expect(extractSqlParameters(sql, { databaseType: "oracle" })).toEqual(["id"]);
+    expect(substituteSqlParameters(sql, { LINK: { kind: "raw", value: "WRONG" }, id: { kind: "number", value: "7" } }, { databaseType: "oracle" })).toBe(sql.replace(":id", "7"));
+  });
+
+  describe.each(["oracle", "oceanbase-oracle"] as const)("%s PL/SQL function templates", (databaseType) => {
+    it.each(["BEGIN @fn('ok'); END;", "BEGIN LOOP @fn('ok'); EXIT; END LOOP; END;", "BEGIN IF @fn(1)>0 THEN NULL; ELSIF @fn(2)>0 THEN NULL; END IF; END;", "BEGIN WHILE @fn(1)>0 LOOP NULL; END LOOP; END;", "BEGIN RETURN @fn(1); END;"])(
+      "keeps function templates after control keywords in %s",
+      (sql) => {
+        expect(extractSqlParameters(sql, { databaseType })).toEqual(["fn"]);
+        expect(substituteSqlParameters(sql, { fn: { kind: "raw", value: "test_fn" } }, { databaseType })).toBe(sql.replaceAll("@fn", "test_fn"));
+      },
+    );
+
+    it.each(["begin", "loop", "elsif", "if", "while", "return"])("preserves qualified and quoted remote routines named %s", (name) => {
+      const sql = `BEGIN HR.${name}@LINK(1); "${name}"@LINK(1); END; SELECT * FROM ${name}@LINK`;
+      expect(extractSqlParameters(sql, { databaseType })).toEqual([]);
+      expect(substituteSqlParameters(sql, { LINK: { kind: "raw", value: "WRONG" } }, { databaseType })).toBe(sql);
+    });
   });
 
   it("preserves Dameng quoted THEN objects and qualified THEN routines", () => {

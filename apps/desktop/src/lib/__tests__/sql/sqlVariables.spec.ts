@@ -112,6 +112,18 @@ describe("expandSqlVariables", () => {
       expect(expandSqlVariables(target, { databaseType, declarationSql }).sql).toBe(expected);
     });
 
+    it.each([
+      "SELECT XMLQUERY('/a' PASSING BY VALUE @fn('<a/>') RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING @fn('<a/>') COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING BY /* separator */ VALUE @fn('<a/>') COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING BY VALUE @fn('<a/>'), @fn('<b/>') AS b RETURNING CONTENT) FROM DUAL",
+    ])("expands complete SQL/XML PASSING templates in full and selected SQL in %s", (target) => {
+      const declarationSql = `@set fn = XMLTYPE;\n${target}`;
+      const expected = target.replaceAll("@fn", "XMLTYPE");
+      expect(expandSqlVariables(declarationSql, { databaseType }).sql).toBe(expected);
+      expect(expandSqlVariables(target, { databaseType, declarationSql }).sql).toBe(expected);
+    });
+
     it("preserves SQL/XML keyword-named remote routines with a same-name declaration", () => {
       const target = 'SELECT content@LINK(1), document@LINK(1), passing@LINK(1), HR.content@LINK(1), "CONTENT"@LINK(1) FROM DUAL WHERE id = @LINK';
       expect(expandSqlVariables(`@set LINK = 7;\n${target}`, { databaseType }).sql).toBe('SELECT content@LINK(1), document@LINK(1), passing@LINK(1), HR.content@LINK(1), "CONTENT"@LINK(1) FROM DUAL WHERE id = 7');
@@ -123,6 +135,9 @@ describe("expandSqlVariables", () => {
       "SELECT XMLQUERY('/a' PASSING passing@LINK(1) RETURNING CONTENT) FROM DUAL",
       "SELECT XMLQUERY(passing@LINK(1)) FROM DUAL",
       "SELECT XMLQUERY(fn_nested('/a') PASSING passing@LINK(1) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLQUERY('/a' PASSING BY VALUE value@LINK(1) RETURNING CONTENT) FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING passing@LINK(1) COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
+      "SELECT XMLTABLE('/a' PASSING BY VALUE HR.value@LINK(1), \"VALUE\"@LINK(1) AS b COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL",
     ])("preserves real routines inside SQL/XML clauses in %s", (target) => {
       expect(expandSqlVariables(`@set LINK = WRONG;\n${target}`, { databaseType }).sql).toBe(target);
     });
@@ -135,6 +150,23 @@ describe("expandSqlVariables", () => {
     it("expands keyword-led references and leaves unresolved references intact", () => {
       const target = "SELECT CASE WHEN @dm1 THEN @dm1 ELSE @missing END FROM DUAL; BEGIN IF @dm1 THEN NULL; END IF; RETURN @dm1; END;";
       expect(expandSqlVariables(`@set dm1 = 7;\n${target}`, { databaseType }).sql).toBe("SELECT CASE WHEN 7 THEN 7 ELSE @missing END FROM DUAL; BEGIN IF 7 THEN NULL; END IF; RETURN 7; END;");
+    });
+  });
+
+  describe.each(["oracle", "oceanbase-oracle"] as const)("%s PL/SQL function templates", (databaseType) => {
+    it.each(["BEGIN @fn('ok'); END;", "BEGIN LOOP @fn('ok'); EXIT; END LOOP; END;", "BEGIN IF @fn(1)>0 THEN NULL; ELSIF @fn(2)>0 THEN NULL; END IF; END;", "BEGIN WHILE @fn(1)>0 LOOP NULL; END LOOP; END;", "BEGIN RETURN @fn(1); END;"])(
+      "expands full and selected function templates in %s",
+      (target) => {
+        const declarationSql = `@set fn = test_fn;\n${target}`;
+        const expected = target.replaceAll("@fn", "test_fn");
+        expect(expandSqlVariables(declarationSql, { databaseType }).sql).toBe(expected);
+        expect(expandSqlVariables(target, { databaseType, declarationSql }).sql).toBe(expected);
+      },
+    );
+
+    it.each(["begin", "loop", "elsif", "if", "while", "return"])("preserves qualified and quoted routines named %s with a same-name declaration", (name) => {
+      const target = `BEGIN HR.${name}@LINK(1); "${name}"@LINK(1); END; SELECT * FROM ${name}@LINK`;
+      expect(expandSqlVariables(`@set LINK = WRONG;\n${target}`, { databaseType }).sql).toBe(target);
     });
   });
 

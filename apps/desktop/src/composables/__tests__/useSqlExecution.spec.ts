@@ -997,6 +997,33 @@ SELECT @value AS Message;`;
     expect(executeCurrentSql).toHaveBeenLastCalledWith("SELECT XMLSERIALIZE(CONTENT XMLTYPE('<a/>') AS CLOB) FROM DUAL", { tabId: "tab-1" });
   });
 
+  it.each([
+    { databaseType: "oracle", target: "SELECT XMLQUERY('/a' PASSING BY VALUE @fn('<a/>') RETURNING CONTENT) FROM DUAL", value: "XMLTYPE" },
+    { databaseType: "oracle", target: "SELECT XMLTABLE('/a' PASSING @fn('<a/>') COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL", value: "XMLTYPE" },
+    { databaseType: "dameng", target: "SELECT XMLTABLE('/a' PASSING BY VALUE @fn('<a/>') COLUMNS name VARCHAR2(50) PATH '.') FROM DUAL", value: "XMLTYPE" },
+    { databaseType: "oceanbase-oracle", target: "SELECT XMLQUERY('/a' PASSING BY VALUE @fn('<a/>') RETURNING CONTENT) FROM DUAL", value: "XMLTYPE" },
+    { databaseType: "oracle", target: "BEGIN @fn('ok'); END;", value: "DBMS_OUTPUT.PUT_LINE" },
+    { databaseType: "oceanbase-oracle", target: "BEGIN LOOP @fn('ok'); EXIT; END LOOP; END;", value: "DBMS_OUTPUT.PUT_LINE" },
+  ] as const)("executes full and selected $databaseType function templates in $target", async ({ databaseType, target, value }) => {
+    const sql = `@set fn = ${value};\n${target}`;
+    const selectionFrom = sql.indexOf(target);
+    const activeTab = ref<QueryTab | undefined>({ ...queryTab("test"), sql });
+    const activeConnection = ref<ConnectionConfig | undefined>(connection(databaseType));
+    const activeOutputView = ref<"result" | "summary" | "explain" | "chart">("result");
+    const executeCurrentSql = vi.spyOn(useQueryStore(), "executeCurrentSql").mockResolvedValue(undefined);
+    vi.spyOn(useHistoryStore(), "add").mockResolvedValue(undefined);
+    const execution = useSqlExecution({ activeTab: computed(() => activeTab.value), activeConnection: computed(() => activeConnection.value), executableSql: computed(() => sql), activeOutputView });
+
+    await execution.tryExecute();
+    await execution.tryExecute({ fullSql: sql, selectedSql: target, cursorPos: selectionFrom, selectionFrom, selectionTo: sql.length });
+
+    expect(execution.showSqlParameterDialog.value).toBe(false);
+    expect(execution.sqlParameterNames.value).toEqual([]);
+    expect(executeCurrentSql).toHaveBeenCalledTimes(2);
+    expect(executeCurrentSql).toHaveBeenNthCalledWith(1, target.replaceAll("@fn", value), { tabId: "tab-1" });
+    expect(executeCurrentSql).toHaveBeenNthCalledWith(2, target.replaceAll("@fn", value), { tabId: "tab-1" });
+  });
+
   it("sends native SET variables without client-side expansion", async () => {
     const activeTab = ref<QueryTab | undefined>(queryTab("app"));
     const activeConnection = ref<ConnectionConfig | undefined>(connection("mysql"));
